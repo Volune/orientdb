@@ -15,6 +15,7 @@ public class CustomFunctionsFactory implements OSQLFunctionFactory {
 
   static {
     FUNCTIONS.put(SQLFunctionFromStack.NAME.toUpperCase(Locale.ENGLISH), new SQLFunctionFromStack());
+    FUNCTIONS.put(SQLFunctionToSet.NAME.toUpperCase(Locale.ENGLISH), new SQLFunctionToSet());
   }
 
   public Set<String> getFunctionNames() {
