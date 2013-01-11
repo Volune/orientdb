@@ -149,6 +149,11 @@ public class OMVRBTreeRID extends OMVRBTreePersistent<OIdentifiable, OIdentifiab
   public void putAll(final Collection<OIdentifiable> coll) {
     final long timer = PROFILER.startChrono();
 
+    //iterating over keySet may fix it
+    Iterator<OIdentifiable> iterator = this.keySet().iterator();
+    while (iterator.hasNext())
+      iterator.next();
+
     try {
       for (OIdentifiable rid : coll)
         internalPut(rid, null);
@@ -303,6 +308,14 @@ public class OMVRBTreeRID extends OMVRBTreePersistent<OIdentifiable, OIdentifiab
   public Set<OIdentifiable> keySet() {
     ((OMVRBTreeRIDProvider) dataProvider).lazyUnmarshall();
     return super.keySet();
+  }
+
+  public long debug1(){
+    long count = 0;
+    for(Object o : keySet()){
+      count++;
+    }
+    return count;
   }
 
   @Override
