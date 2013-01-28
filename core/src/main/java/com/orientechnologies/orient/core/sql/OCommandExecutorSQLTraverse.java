@@ -56,6 +56,8 @@ public class OCommandExecutorSQLTraverse extends OCommandExecutorSQLResultsetAbs
   // HANDLES ITERATION IN LAZY WAY
   private OTraverse          traverse         = new OTraverse();
 
+  private Map<Object, Object>         iteratorBindingParameters;
+
   /**
    * Compile the filter conditions only the first time.
    */
@@ -150,7 +152,7 @@ public class OCommandExecutorSQLTraverse extends OCommandExecutorSQLResultsetAbs
 
   public boolean hasNext() {
     if (target == null)
-      assignTarget(null);
+      assignTarget(iteratorBindingParameters);
 
     return traverse.hasNext();
   }
@@ -162,7 +164,7 @@ public class OCommandExecutorSQLTraverse extends OCommandExecutorSQLResultsetAbs
 
   public OIdentifiable next() {
     if (target == null)
-      assignTarget(null);
+      assignTarget(iteratorBindingParameters);
 
     return traverse.next();
   }
@@ -173,6 +175,10 @@ public class OCommandExecutorSQLTraverse extends OCommandExecutorSQLResultsetAbs
 
   public Iterator<OIdentifiable> iterator() {
     return this;
+  }
+
+  public void setIteratorBindingParameters(final Map<Object, Object> iArgs) {
+    iteratorBindingParameters = iArgs;
   }
 
   protected int parseFields() {

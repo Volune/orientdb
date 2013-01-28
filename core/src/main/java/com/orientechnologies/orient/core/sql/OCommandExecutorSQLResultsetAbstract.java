@@ -136,8 +136,13 @@ public abstract class OCommandExecutorSQLResultsetAbstract extends OCommandExecu
         searchInClasses();
       else if (parsedTarget.getTargetClusters() != null)
         searchInClusters();
-      else if (parsedTarget.getTargetRecords() != null)
+      else if (parsedTarget.getTargetRecords() != null) {
         target = parsedTarget.getTargetRecords().iterator();
+        if(target instanceof OCommandExecutorSQLTraverse)
+            ((OCommandExecutorSQLTraverse)target).setIteratorBindingParameters(iArgs);
+        if(target instanceof OCommandExecutorSQLSelect)
+            ((OCommandExecutorSQLSelect)target).setIteratorBindingParameters(iArgs);
+      }
       else if (parsedTarget.getTargetVariable() != null) {
         final Object var = getContext().getVariable(parsedTarget.getTargetVariable());
         if (var == null) {

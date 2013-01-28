@@ -77,7 +77,7 @@ import com.orientechnologies.orient.core.type.tree.OMVRBTreeRIDSet;
  * Executes the SQL SELECT statement. the parse() method compiles the query and builds the meta information needed by the execute().
  * If the query contains the ORDER BY clause, the results are temporary collected internally, then ordered and finally returned all
  * together to the listener.
- * 
+ *
  * @author Luca Garulli
  */
 @SuppressWarnings("unchecked")
@@ -100,6 +100,7 @@ public class OCommandExecutorSQLSelect extends OCommandExecutorSQLResultsetAbstr
   private int                         fetchLimit           = -1;
   private OIdentifiable               lastRecord;
   private Iterator<OIdentifiable>     subIterator;
+  private Map<Object, Object>         iteratorBindingParameters;
 
   /**
    * Compile the filter conditions only the first time.
@@ -166,7 +167,7 @@ public class OCommandExecutorSQLSelect extends OCommandExecutorSQLResultsetAbstr
 
   /**
    * Determine clusters that are used in select operation
-   * 
+   *
    * @return set of involved clusters
    */
   public Set<Integer> getInvolvedClusters() {
@@ -198,7 +199,7 @@ public class OCommandExecutorSQLSelect extends OCommandExecutorSQLResultsetAbstr
   /**
    * Add condition so that query will be executed only on the given id range. That is used to verify that query will be executed on
    * the single node
-   * 
+   *
    * @param fromId
    * @param toId
    * @return this
@@ -241,7 +242,7 @@ public class OCommandExecutorSQLSelect extends OCommandExecutorSQLResultsetAbstr
   }
 
   /**
-   * 
+   *
    * @return {@code ture} if any of the sql functions perform aggreagation, {@code false} otherwise
    */
   public boolean isAnyFunctionAggregates() {
@@ -268,7 +269,7 @@ public class OCommandExecutorSQLSelect extends OCommandExecutorSQLResultsetAbstr
     if (subIterator == null) {
       if (target == null) {
         // GET THE RESULT
-        executeSearch(null);
+        executeSearch(iteratorBindingParameters);
         applyFlatten();
         handleNoTarget();
         handleGroupBy();
@@ -299,6 +300,10 @@ public class OCommandExecutorSQLSelect extends OCommandExecutorSQLResultsetAbstr
 
   public Iterator<OIdentifiable> iterator() {
     return this;
+  }
+
+  public void setIteratorBindingParameters(final Map<Object, Object> iArgs) {
+      iteratorBindingParameters = iArgs;
   }
 
   public Object execute(final Map<Object, Object> iArgs) {
@@ -740,7 +745,7 @@ public class OCommandExecutorSQLSelect extends OCommandExecutorSQLResultsetAbstr
 
   /**
    * Add SQL filter field to the search candidate list.
-   * 
+   *
    * @param iCondition
    *          Condition item
    * @param iItem
