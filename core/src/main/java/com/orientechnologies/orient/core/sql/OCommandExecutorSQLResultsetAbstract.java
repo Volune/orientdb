@@ -283,66 +283,6 @@ public abstract class OCommandExecutorSQLResultsetAbstract extends OCommandExecu
     return skip;
   }
 
-  protected boolean filter(final ORecordInternal<?> iRecord) {
-    context.setVariable("current", iRecord);
-
-    if (iRecord instanceof ORecordSchemaAware<?>) {
-      // CHECK THE TARGET CLASS
-      final ORecordSchemaAware<?> recordSchemaAware = (ORecordSchemaAware<?>) iRecord;
-      Map<OClass, String> targetClasses = parsedTarget.getTargetClasses();
-      // check only classes that specified in query will go to result set
-      if ((targetClasses != null) && (!targetClasses.isEmpty())) {
-        for (OClass targetClass : targetClasses.keySet()) {
-          if (!targetClass.isSuperClassOf(recordSchemaAware.getSchemaClass()))
-            return false;
-        }
-        context.updateMetric("documentAnalyzedCompatibleClass", +1);
-      }
-    }
-
-    return evaluateRecord(iRecord);
-  }
-
-  protected boolean evaluateRecord(final ORecord<?> iRecord) {
-    assignLetClauses(iRecord);
-    if (compiledFilter == null)
-      return true;
-    return (Boolean) compiledFilter.evaluate(iRecord, null, context);
-  }
-
-  protected void assignLetClauses(final ORecord<?> iRecord) {
-    if (let != null && !let.isEmpty()) {
-      // BIND CONTEXT VARIABLES
-      for (Entry<String, Object> entry : let.entrySet()) {
-        String varName = entry.getKey();
-        if (varName.startsWith("$"))
-          varName = varName.substring(1);
-
-        final Object letValue = entry.getValue();
-
-        Object varValue;
-        if (letValue instanceof OSQLSynchQuery<?>) {
-          final OSQLSynchQuery<Object> subQuery = (OSQLSynchQuery<Object>) letValue;
-          subQuery.reset();
-          subQuery.resetPagination();
-          subQuery.setContext(context);
-          subQuery.getContext().setVariable("current", iRecord);
-          varValue = ODatabaseRecordThreadLocal.INSTANCE.get().query(subQuery);
-        } else if (letValue instanceof OSQLFunctionRuntime) {
-          final OSQLFunctionRuntime f = (OSQLFunctionRuntime) letValue;
-          if (f.getFunction().aggregateResults()) {
-            f.execute(iRecord, null, context);
-            varValue = f.getFunction().getResult();
-          } else
-            varValue = f.execute(iRecord, null, context);
-        } else
-          varValue = ODocumentHelper.getFieldValue(iRecord, ((String) letValue).trim());
-
-        context.setVariable(varName, varValue);
-      }
-    }
-  }
-
   protected void searchInClasses() {
     final OClass cls = parsedTarget.getTargetClasses().keySet().iterator().next();
 

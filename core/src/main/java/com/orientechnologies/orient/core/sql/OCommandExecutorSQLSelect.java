@@ -35,6 +35,7 @@ import com.orientechnologies.common.concur.resource.OSharedResource;
 import com.orientechnologies.common.util.OPair;
 import com.orientechnologies.orient.core.command.OBasicCommandContext;
 import com.orientechnologies.orient.core.command.OCommandRequest;
+import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
 import com.orientechnologies.orient.core.db.record.ODatabaseRecord;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.exception.OCommandExecutionException;
@@ -49,6 +50,7 @@ import com.orientechnologies.orient.core.metadata.security.ODatabaseSecurityReso
 import com.orientechnologies.orient.core.metadata.security.ORole;
 import com.orientechnologies.orient.core.record.ORecord;
 import com.orientechnologies.orient.core.record.ORecordInternal;
+import com.orientechnologies.orient.core.record.ORecordSchemaAware;
 import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.orientechnologies.orient.core.record.impl.ODocumentHelper;
 import com.orientechnologies.orient.core.serialization.serializer.OStringSerializerHelper;
@@ -70,6 +72,7 @@ import com.orientechnologies.orient.core.sql.operator.OQueryOperatorMajorEquals;
 import com.orientechnologies.orient.core.sql.operator.OQueryOperatorMinor;
 import com.orientechnologies.orient.core.sql.operator.OQueryOperatorMinorEquals;
 import com.orientechnologies.orient.core.sql.operator.OQueryOperatorOr;
+import com.orientechnologies.orient.core.sql.query.OSQLSynchQuery;
 import com.orientechnologies.orient.core.storage.OStorage;
 import com.orientechnologies.orient.core.type.tree.OMVRBTreeRIDSet;
 
@@ -101,6 +104,7 @@ public class OCommandExecutorSQLSelect extends OCommandExecutorSQLResultsetAbstr
   private OIdentifiable               lastRecord;
   private Iterator<OIdentifiable>     subIterator;
   private Map<Object, Object>         iteratorBindingParameters;
+  private Map<Object, Object>         executeBindingParameters;
 
   /**
    * Compile the filter conditions only the first time.
@@ -338,9 +342,11 @@ public class OCommandExecutorSQLSelect extends OCommandExecutorSQLResultsetAbstr
     }
 
     // BROWSE ALL THE RECORDS
+    executeBindingParameters = iArgs;
     while (target.hasNext())
       if (!executeSearchRecord(target.next()))
         break;
+    executeBindingParameters = null;
 
     if (request.getResultListener() != null)
       request.getResultListener().end();
@@ -375,6 +381,69 @@ public class OCommandExecutorSQLSelect extends OCommandExecutorSQLResultsetAbstr
         return false;
 
     return true;
+  }
+
+  protected boolean filter(final ORecordInternal<?> iRecord) {
+    context.setVariable("current", iRecord);
+
+    if (iRecord instanceof ORecordSchemaAware<?>) {
+      // CHECK THE TARGET CLASS
+      final ORecordSchemaAware<?> recordSchemaAware = (ORecordSchemaAware<?>) iRecord;
+      Map<OClass, String> targetClasses = parsedTarget.getTargetClasses();
+      // check only classes that specified in query will go to result set
+      if ((targetClasses != null) && (!targetClasses.isEmpty())) {
+        for (OClass targetClass : targetClasses.keySet()) {
+          if (!targetClass.isSuperClassOf(recordSchemaAware.getSchemaClass()))
+            return false;
+        }
+        context.updateMetric("documentAnalyzedCompatibleClass", +1);
+      }
+    }
+
+    return evaluateRecord(iRecord);
+  }
+
+  protected boolean evaluateRecord(final ORecord<?> iRecord) {
+    assignLetClauses(iRecord);
+    if (compiledFilter == null)
+      return true;
+    return (Boolean) compiledFilter.evaluate(iRecord, null, context);
+  }
+
+  protected void assignLetClauses(final ORecord<?> iRecord) {
+    if (let != null && !let.isEmpty()) {
+      // BIND CONTEXT VARIABLES
+      for (Entry<String, Object> entry : let.entrySet()) {
+        String varName = entry.getKey();
+        if (varName.startsWith("$"))
+          varName = varName.substring(1);
+
+        final Object letValue = entry.getValue();
+
+        Object varValue;
+        if (letValue instanceof OSQLSynchQuery<?>) {
+          final OSQLSynchQuery<Object> subQuery = (OSQLSynchQuery<Object>) letValue;
+          subQuery.reset();
+          subQuery.resetPagination();
+          subQuery.setContext(context);
+          subQuery.getContext().setVariable("current", iRecord);
+          if( executeBindingParameters != null )
+            varValue = ODatabaseRecordThreadLocal.INSTANCE.get().query(subQuery, executeBindingParameters);
+          else
+            varValue = ODatabaseRecordThreadLocal.INSTANCE.get().query(subQuery);
+        } else if (letValue instanceof OSQLFunctionRuntime) {
+          final OSQLFunctionRuntime f = (OSQLFunctionRuntime) letValue;
+          if (f.getFunction().aggregateResults()) {
+            f.execute(iRecord, null, context);
+            varValue = f.getFunction().getResult();
+          } else
+            varValue = f.execute(iRecord, null, context);
+        } else
+          varValue = ODocumentHelper.getFieldValue(iRecord, ((String) letValue).trim());
+
+        context.setVariable(varName, varValue);
+      }
+    }
   }
 
   protected boolean handleResult(final OIdentifiable iRecord) {
