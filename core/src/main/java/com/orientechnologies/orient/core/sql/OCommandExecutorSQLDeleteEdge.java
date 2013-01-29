@@ -125,6 +125,9 @@ public class OCommandExecutorSQLDeleteEdge extends OCommandExecutorSQLSetAware i
     if (!(database instanceof OGraphDatabase))
       database = new OGraphDatabase((ODatabaseRecordTx) database);
 
+    if(compiledFilter != null)
+      compiledFilter.bindParameters(iArgs);
+
     if (rid != null) {
       // REMOVE PUNCTUAL RID
       if (((OGraphDatabase) database).removeEdge(rid))
