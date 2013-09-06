@@ -594,7 +594,7 @@ public class ODatabaseImport extends ODatabaseImpExpAbstract {
 
         } else {
           boolean clusterCreated = false;
-          if (database.getStorage().getClusterById(importId) == null) {
+          if (!hasClusterWithId(importId)) {
             try {
               existingClusterId = database.addCluster(type, name, importId, null, null);
               listener.onMessage("\n- Creating cluster " + name + " from id " + importId + " at (same) id " + existingClusterId + ".");
@@ -647,6 +647,15 @@ public class ODatabaseImport extends ODatabaseImpExpAbstract {
       ((OLocalPaginatedStorage) database.getStorage()).enableFullCheckPointAfterClusterCreate();
 
     return total;
+  }
+
+  private boolean hasClusterWithId(int clusterId) {
+    try {
+      return database.getStorage().getClusterById(clusterId) == null;
+    } catch (IllegalArgumentException ignored) {
+      //most implementations throws IllegalArgumentException when there is no cluster with requested id
+      return false;
+    }
   }
 
   protected void removeDefaultClusters() {
