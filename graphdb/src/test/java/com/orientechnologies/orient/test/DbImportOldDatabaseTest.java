@@ -106,9 +106,10 @@ public class DbImportOldDatabaseTest implements OCommandOutputListener {
     OGraphDatabase database = new OGraphDatabase("local:" + importDbPath);
     database.create();
 
-    database.getMetadata().getSchema().dropClass("ORIDs");
-    database.getMetadata().getSchema().dropClass("V");
-    database.getMetadata().getSchema().dropClass("E");
+    //no need to remove classes with fixed import
+//    database.getMetadata().getSchema().dropClass("ORIDs");
+//    database.getMetadata().getSchema().dropClass("V");
+//    database.getMetadata().getSchema().dropClass("E");
 
     ODatabaseImport impor = new ODatabaseImport(database, exportFile, this);
 

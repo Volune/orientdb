@@ -37,7 +37,6 @@ import com.orientechnologies.orient.core.db.ODatabase.STATUS;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocument;
 import com.orientechnologies.orient.core.db.record.OClassTrigger;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
-import com.orientechnologies.orient.core.exception.OConfigurationException;
 import com.orientechnologies.orient.core.id.OClusterPositionFactory;
 import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.id.ORecordId;
@@ -77,7 +76,7 @@ import com.orientechnologies.orient.core.version.OVersionFactory;
 
 /**
  * Import data from a file into a database.
- * 
+ *
  * @author Luca Garulli (l.garulli--at--orientechnologies.com)
  */
 public class ODatabaseImport extends ODatabaseImpExpAbstract {
@@ -95,6 +94,8 @@ public class ODatabaseImport extends ODatabaseImpExpAbstract {
   protected ORID                                        schemaRecordId;
   protected ORID                                        indexMgrRecordId;
   protected boolean                                     deleteRIDMapping                 = true;
+  protected Map<Integer, String>                        clusterNameByImportId            = new HashMap<Integer, String>();
+  protected Map<Integer, Integer>                       clusterIdByImportId              = new HashMap<Integer, Integer>();
 
   private OLocalHashTable<OIdentifiable, OIdentifiable> exportImportHashTable;
 
@@ -184,6 +185,8 @@ public class ODatabaseImport extends ODatabaseImpExpAbstract {
           importManualIndexes();
       }
 
+      clusterIdByImportId.clear();
+      clusterNameByImportId.clear();
       database.getStorage().synch();
       exportImportHashTable.close();
       database.setStatus(STATUS.OPEN);
@@ -328,7 +331,7 @@ public class ODatabaseImport extends ODatabaseImpExpAbstract {
         final int classDefClusterId;
         if (jsonReader.isContent("\"default-cluster-id\"")) {
           next = jsonReader.readString(OJSONReader.NEXT_IN_OBJECT);
-          classDefClusterId = Integer.parseInt(next);
+          classDefClusterId = convertImportClusterId(Integer.parseInt(next));
         } else
           classDefClusterId = database.getDefaultClusterId();
 
@@ -352,7 +355,7 @@ public class ODatabaseImport extends ODatabaseImpExpAbstract {
           // ASSIGN OTHER CLUSTER IDS
           for (int i : OStringSerializerHelper.splitIntArray(classClusterIds)) {
             if (i != -1)
-              cls.addClusterId(i);
+              cls.addClusterId(convertImportClusterId(i));
           }
         }
 
@@ -412,6 +415,18 @@ public class ODatabaseImport extends ODatabaseImpExpAbstract {
       e.printStackTrace();
       listener.onMessage("ERROR (" + classImported + " entries): " + e);
     }
+  }
+
+  private int convertImportClusterId(int importClusterId) {
+    if(-1 == importClusterId)
+      return -1;
+    Integer existingClusterId = clusterIdByImportId.get(importClusterId);
+    if (null == existingClusterId) {
+      listener.onMessage("\nWARNING Can't find cluster id from previous id " + importClusterId
+          + " (probably didn't have a name)...");
+      return -1;
+    }
+    return existingClusterId;
   }
 
   private void importProperty(final OClass iClass) throws IOException, ParseException {
@@ -559,43 +574,51 @@ public class ODatabaseImport extends ODatabaseImpExpAbstract {
           }
         }
 
-      int id = jsonReader.readNext(OJSONReader.FIELD_ASSIGNMENT).checkContent("\"id\"").readInteger(OJSONReader.COMMA_SEPARATOR);
+      int importId = jsonReader.readNext(OJSONReader.FIELD_ASSIGNMENT).checkContent("\"id\"").readInteger(OJSONReader.COMMA_SEPARATOR);
       String type = jsonReader.readNext(OJSONReader.FIELD_ASSIGNMENT).checkContent("\"type\"")
           .readString(OJSONReader.NEXT_IN_OBJECT);
 
-      if (jsonReader.lastChar() == ',') {
-        rid = new ORecordId(jsonReader.readNext(OJSONReader.FIELD_ASSIGNMENT).checkContent("\"rid\"")
-            .readString(OJSONReader.NEXT_IN_OBJECT));
-      } else
-        rid = null;
+      clusterNameByImportId.put(importId, name);
 
-      listener.onMessage("\n- Creating cluster " + (name != null ? "'" + name + "'" : "NULL") + "...");
+      if (name != null) {
 
-      int clusterId = name != null ? database.getClusterIdByName(name) : -1;
-      if (clusterId == -1) {
-        // CREATE IT
-        clusterId = database.addCluster(type, name, null, null);
+        int existingClusterId = database.getClusterIdByName(name);
+
+        if (existingClusterId == importId) {
+          listener.onMessage("\n- Keeping cluster " + name + " with id " + importId + ".");
+          clusterIdByImportId.put(importId, existingClusterId);
+
+        } else if (existingClusterId != -1) {
+          listener.onMessage("\n- Moving cluster " + name + " from id " + importId + " to id " + existingClusterId + ".");
+          clusterIdByImportId.put(importId, existingClusterId);
+
+        } else {
+          boolean clusterCreated = false;
+          if (!hasClusterWithId(importId)) {
+            try {
+              existingClusterId = database.addCluster(type, name, importId, null, null);
+              listener.onMessage("\n- Creating cluster " + name + " from id " + importId + " at (same) id " + existingClusterId + ".");
+              clusterCreated = true;
+            } catch (UnsupportedOperationException ignored) {
+              //create cluster anywhere else
+            }
+          }
+          if (!clusterCreated) {
+            existingClusterId = database.addCluster(type, name, null, null);
+            listener.onMessage("\n- Creating cluster " + name + " from id " + importId + " at id " + existingClusterId + ".");
+          }
+          clusterIdByImportId.put(importId, existingClusterId);
+        }
+
+        if (!(name.equalsIgnoreCase(OMetadata.CLUSTER_MANUAL_INDEX_NAME)
+            || name.equalsIgnoreCase(OMetadata.CLUSTER_INTERNAL_NAME)
+            || name.equalsIgnoreCase(OMetadata.CLUSTER_INDEX_NAME)))
+          database.getStorage().getClusterById(existingClusterId).truncate();
+
+      } //do we really need to recreate a cluster without name ? skip...
+      else {
+        listener.onMessage("\n- Creating cluster with id " + importId + " and no name.");
       }
-
-      if (clusterId != id) {
-        if (database.countClusterElements(clusterId - 1) == 0) {
-          listener.onMessage("Found previous version: migrating old clusters...");
-          database.dropCluster(name, true);
-          database.addCluster(type, "temp_" + clusterId, null, null);
-          clusterId = database.addCluster(type, name, null, null);
-        } else
-          throw new OConfigurationException("Imported cluster '" + name + "' has id=" + clusterId
-              + " different from the original: " + id + ". To continue the import drop the cluster '"
-              + database.getClusterNameById(clusterId - 1) + "' that has " + database.countClusterElements(clusterId - 1)
-              + " records");
-      }
-
-      if (name != null
-          && !(name.equalsIgnoreCase(OMetadata.CLUSTER_MANUAL_INDEX_NAME) || name.equalsIgnoreCase(OMetadata.CLUSTER_INTERNAL_NAME) || name
-              .equalsIgnoreCase(OMetadata.CLUSTER_INDEX_NAME)))
-        database.getStorage().getClusterById(clusterId).truncate();
-
-      listener.onMessage("OK, assigned id=" + clusterId);
 
       total++;
 
@@ -624,6 +647,15 @@ public class ODatabaseImport extends ODatabaseImpExpAbstract {
       ((OLocalPaginatedStorage) database.getStorage()).enableFullCheckPointAfterClusterCreate();
 
     return total;
+  }
+
+  private boolean hasClusterWithId(int clusterId) {
+    try {
+      return database.getStorage().getClusterById(clusterId) == null;
+    } catch (IllegalArgumentException ignored) {
+      //most implementations throws IllegalArgumentException when there is no cluster with requested id
+      return false;
+    }
   }
 
   protected void removeDefaultClusters() {
@@ -720,14 +752,20 @@ public class ODatabaseImport extends ODatabaseImpExpAbstract {
         return null;
       }
 
+      final ORID rid = record.getIdentity();
+      final int clusterId = rid.getClusterId();
+      String clusterName = clusterNameByImportId.get(clusterId);
+      if (null == clusterName) //should not happen if clusters are defined in import/export file
+        clusterName = database.getClusterNameById(clusterId);
+
       // CHECK IF THE CLUSTER IS INCLUDED
       if (includeClusters != null) {
-        if (!includeClusters.contains(database.getClusterNameById(record.getIdentity().getClusterId()))) {
+        if (!includeClusters.contains(clusterName)) {
           jsonReader.readNext(OJSONReader.NEXT_IN_ARRAY);
           return null;
         }
       } else if (excludeClusters != null) {
-        if (excludeClusters.contains(database.getClusterNameById(record.getIdentity().getClusterId())))
+        if (excludeClusters.contains(clusterName))
           return null;
       }
 
@@ -736,20 +774,14 @@ public class ODatabaseImport extends ODatabaseImpExpAbstract {
         return null;
 
       if (exporterVersion >= 3) {
-        int oridsId = database.getClusterIdByName(OMVRBTreeRIDProvider.PERSISTENT_CLASS_NAME);
-        int indexId = database.getClusterIdByName(OMetadata.CLUSTER_INDEX_NAME);
-
-        if (record.getIdentity().getClusterId() == indexId || record.getIdentity().getClusterId() == oridsId)
+        if (OMVRBTreeRIDProvider.PERSISTENT_CLASS_NAME.equalsIgnoreCase(clusterName) ||
+                OMetadata.CLUSTER_INDEX_NAME.equalsIgnoreCase(clusterName))
           // JUMP INDEX RECORDS
           return null;
       }
 
-      final int manualIndexCluster = database.getClusterIdByName(OMetadata.CLUSTER_MANUAL_INDEX_NAME);
-      final int internalCluster = database.getClusterIdByName(OMetadata.CLUSTER_INTERNAL_NAME);
-      final int indexCluster = database.getClusterIdByName(OMetadata.CLUSTER_INDEX_NAME);
-
       if (exporterVersion >= 4) {
-        if (record.getIdentity().getClusterId() == manualIndexCluster)
+        if (OMetadata.CLUSTER_MANUAL_INDEX_NAME.equalsIgnoreCase(clusterName))
           // JUMP INDEX RECORDS
           return null;
       }
@@ -757,16 +789,14 @@ public class ODatabaseImport extends ODatabaseImpExpAbstract {
       if (record.getIdentity().equals(indexMgrRecordId))
         return null;
 
-      final ORID rid = record.getIdentity();
-
-      final int clusterId = rid.getClusterId();
-
-      if ((clusterId != manualIndexCluster && clusterId != internalCluster && clusterId != indexCluster)) {
+      if (!(OMetadata.CLUSTER_MANUAL_INDEX_NAME.equalsIgnoreCase(clusterName) ||
+              OMetadata.CLUSTER_INTERNAL_NAME.equalsIgnoreCase(clusterName) ||
+              OMetadata.CLUSTER_INDEX_NAME.equalsIgnoreCase(clusterName))) {
         record.getRecordVersion().copyFrom(OVersionFactory.instance().createVersion());
         record.setDirty();
         record.setIdentity(new ORecordId());
 
-        record.save(database.getClusterNameById(clusterId));
+        record.save(clusterName);
 
         exportImportHashTable.put(rid, record.getIdentity());
       }
